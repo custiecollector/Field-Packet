@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FieldPacket Offline Decoder</title>
+<style>
+  body { margin: 0; background: #071311; color: #e5f9f4; font-family: system-ui, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 20px; }
+  h1 { color: #19d6b4; }
+  textarea, pre { width: 100%; box-sizing: border-box; background: #03100e; color: #e5f9f4; border: 1px solid #24524b; border-radius: 8px; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  textarea { min-height: 260px; }
+  button { background: #19d6b4; color: #001814; border: 0; border-radius: 8px; padding: 12px 16px; font-weight: 700; }
+  .muted { color: #85b1a8; }
+</style>
+</head>
+<body>
+<main>
+<h1>FieldPacket Offline Decoder</h1>
+<p class="muted">Static local decoder for FP1 text packets. No network, no external scripts.</p>
+<textarea id="input">FP1
+TYPE:BULLETIN
+ID:FP-SAMPLE-001
+FROM:FIELD
+AREA:LOCAL
+EXPIRES:2026-06-16T18:00Z
+BODY:Short field bulletin.
+CHECK:D27014D5
+END
+</textarea>
+<p><button onclick="decode()">Decode</button></p>
+<pre id="output">Ready.</pre>
+</main>
+<script>
+function crc32(str) {
+  const table = crc32.table || (crc32.table = (() => {
+    let c, table = [];
+    for (let n = 0; n < 256; n++) {
+      c = n;
+      for (let k = 0; k < 8; k++) c = ((c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1));
+      table[n] = c >>> 0;
+    }
+    return table;
+  })());
+  let crc = 0 ^ (-1);
+  for (let i = 0; i < str.length; i++) crc = (crc >>> 8) ^ table[(crc ^ str.charCodeAt(i)) & 0xFF];
+  return ((crc ^ (-1)) >>> 0).toString(16).toUpperCase().padStart(8, '0');
+}
+function unescapeValue(value) {
+  let out = '', esc = false;
+  for (const ch of value) {
+    if (!esc && ch === '\\') { esc = true; continue; }
+    if (esc) { out += ch === 'n' ? '\n' : ch === 'r' ? '\r' : ch; esc = false; }
+    else out += ch;
+  }
+  if (esc) out += '\\';
+  return out;
+}
+function decode() {
+  const raw = document.getElementById('input').value.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  const out = document.getElementById('output');
+  const lines = raw.split('\n').map(line => line.trim()).filter(Boolean);
+  if (lines[0] !== 'FP1') { out.textContent = 'Decode failed: not an FP1 packet.'; return; }
+  let canonical = 'FP1\n';
+  const fields = {};
+  let check = '', sawEnd = false;
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line === 'END') { sawEnd = true; break; }
+    const colon = line.indexOf(':');
+    if (colon <= 0) { out.textContent = `Decode failed: malformed line ${i + 1}`; return; }
+    const key = line.slice(0, colon).trim().toUpperCase();
+    const value = line.slice(colon + 1);
+    if (key === 'CHECK') { check = value.trim().toUpperCase(); continue; }
+    canonical += key + ':' + value + '\n';
+    fields[key] = unescapeValue(value);
+  }
+  if (!sawEnd) { out.textContent = 'Decode failed: missing END.'; return; }
+  const computed = crc32(canonical);
+  if (computed !== check) { out.textContent = `Decode failed: checksum mismatch. Expected ${computed}, packet has ${check}.`; return; }
+  out.textContent = `Decoded OK\nChecksum: ${computed}\n\nTYPE: ${fields.TYPE || ''}\nID: ${fields.ID || ''}\nFROM: ${fields.FROM || ''}\nAREA: ${fields.AREA || ''}\nEXPIRES: ${fields.EXPIRES || ''}\nPRIORITY: ${fields.PRIORITY || ''}\nLOCATION: ${fields.LOCATION || ''}\nNEEDS: ${fields.NEEDS || ''}\nBODY:\n${fields.BODY || ''}`;
+}
+decode();
+</script>
+</body>
+</html>
